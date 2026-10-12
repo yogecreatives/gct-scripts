@@ -301,8 +301,9 @@ class ScrollHighlight extends HTMLElement {
         }
 
         .k {
-          ${keyStyle}
-        }
+  ${keyStyle}
+  font-style: italic;
+}
 
         @media (min-width: 769px) and (max-width: 1024px) {
           p {
