@@ -266,20 +266,24 @@ class ScrollHighlight extends HTMLElement {
           overflow-wrap: break-word;
         }
 
+        
         .w {
           display: inline-block;
           opacity: ${this._reduced ? 1 : dim};
-          transform: ${this._reduced ? 'none' : initialTransform};
+          filter: ${this._reduced ? 'none' : 'blur(5px)'};
+          transform: none;
           transition:
             opacity ${duration}ms ease,
-            transform ${duration}ms cubic-bezier(.22, 1, .36, 1);
+            filter ${duration}ms cubic-bezier(.22, 1, .36, 1);
           transition-delay: calc(var(--i) * ${stagger}ms);
+          will-change: opacity, filter;
         }
 
         .w.on {
           opacity: 1;
-          transform: translate3d(0, 0, 0);
+          filter: blur(0);
         }
+
 
         .k {
           ${keyStyle}
