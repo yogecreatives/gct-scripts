@@ -1,31 +1,29 @@
 
 /**
  * <scroll-highlight> custom element for Wix Studio
- * Premium scroll-driven word reveal animation.
+ * Premium scroll-driven word reveal with responsive typography.
  *
- * Attributes:
- *   text       Sentence with highlighted phrases: {1:highlighted text}
- *   track      "auto", CSS selector, or empty
- *   font       Font family
- *   font-url   Google Fonts stylesheet URL
- *   color      Main text color
- *   dim        Initial word opacity (0 to 1)
- *   size       Font size
- *   weight     Font weight
- *   align      left, center, right
- *   line       Line height
- *   color1-4   Highlight colors
- *   underline  on or off
+ * EXISTING ATTRIBUTES
+ * text, track, font, font-url, color, dim, size, weight,
+ * align, line, color1, color2, color3, color4, underline
  *
- * Stage 1 animation attributes:
- *   animation  fade or fade-up (default: fade-up)
- *   duration   Transition duration in milliseconds (default: 400)
- *   stagger    Per-word transition delay in milliseconds (default: 0)
- *   distance   Initial vertical offset (default: 12px)
- *   start      Scroll progress at which revealing starts (default: 0)
- *   end        Scroll progress at which revealing finishes (default: 0.85)
+ * ANIMATION ATTRIBUTES
+ * animation: fade | fade-up
+ * duration: milliseconds (default 400)
+ * stagger: per-word delay in milliseconds (default 0)
+ * distance: initial vertical offset (default 12px)
+ * start: normalized scroll progress (default 0)
+ * end: normalized scroll progress (default 0.85)
  *
- * For start/end, use normalized section progress from 0 to 1.
+ * RESPONSIVE ATTRIBUTES
+ * size-tablet, size-mobile
+ * line-tablet, line-mobile
+ * align-tablet, align-mobile
+ * weight-tablet, weight-mobile
+ *
+ * Desktop uses the original size, line, align and weight attributes.
+ * Tablet styles apply from 769px to 1024px.
+ * Mobile styles apply at 768px and below.
  */
 
 const DEFAULT_TEXT =
@@ -39,9 +37,8 @@ const DEFAULT_KEYS = {
   4: '#e4002b'
 };
 
-// Keeps attribute values safe to place inside CSS.
-const safe = (v) =>
-  String(v).replace(/[;{}<>"\\]/g, '').trim();
+const safe = (value) =>
+  String(value).replace(/[;{}<>"\\]/g, '').trim();
 
 class ScrollHighlight extends HTMLElement {
   static get observedAttributes() {
@@ -49,7 +46,11 @@ class ScrollHighlight extends HTMLElement {
       'text', 'track', 'font', 'font-url', 'color', 'dim',
       'size', 'weight', 'align', 'line',
       'color1', 'color2', 'color3', 'color4', 'underline',
-      'animation', 'duration', 'stagger', 'distance', 'start', 'end'
+      'animation', 'duration', 'stagger', 'distance', 'start', 'end',
+      'size-tablet', 'size-mobile',
+      'line-tablet', 'line-mobile',
+      'align-tablet', 'align-mobile',
+      'weight-tablet', 'weight-mobile'
     ];
   }
 
@@ -57,10 +58,10 @@ class ScrollHighlight extends HTMLElement {
     super();
 
     this.attachShadow({ mode: 'open' });
-
     this._words = [];
     this._raf = 0;
     this._queue = this._queue.bind(this);
+
     this._reduced = window.matchMedia(
       '(prefers-reduced-motion: reduce)'
     ).matches;
@@ -102,15 +103,14 @@ class ScrollHighlight extends HTMLElement {
     return Math.min(max, Math.max(min, value));
   }
 
-  // Load Google Fonts in the main document.
   _loadFont(url) {
     if (!url || !/^https:\/\//.test(url)) return;
 
-    const existing = Array.from(
+    const exists = Array.from(
       document.head.querySelectorAll('link[data-sh-font]')
     ).some((link) => link.getAttribute('data-sh-font') === url);
 
-    if (existing) return;
+    if (exists) return;
 
     const link = document.createElement('link');
     link.rel = 'stylesheet';
@@ -121,7 +121,6 @@ class ScrollHighlight extends HTMLElement {
 
   _render() {
     const text = this.getAttribute('text') || DEFAULT_TEXT;
-
     const font = this._attr(
       'font',
       "'Plus Jakarta Sans', system-ui, sans-serif"
@@ -129,6 +128,7 @@ class ScrollHighlight extends HTMLElement {
 
     const color = this._attr('color', '#1b1a17');
     const dim = this._numberAttr('dim', 0.16, 0, 1);
+
     const size = this._attr(
       'size',
       'clamp(1.75rem,5.2vw,4.4rem)'
@@ -137,35 +137,31 @@ class ScrollHighlight extends HTMLElement {
     const align = this._attr('align', 'left');
     const line = this._attr('line', '1.15');
 
+    // Responsive overrides. Empty attributes inherit desktop values.
+    const sizeTablet = this._attr('size-tablet', size);
+    const sizeMobile = this._attr('size-mobile', size);
+
+    const lineTablet = this._attr('line-tablet', line);
+    const lineMobile = this._attr('line-mobile', line);
+
+    const alignTablet = this._attr('align-tablet', align);
+    const alignMobile = this._attr('align-mobile', align);
+
+    const weightTablet = this._attr('weight-tablet', weight);
+    const weightMobile = this._attr('weight-mobile', weight);
+
     const underline =
       this._attr('underline', 'on').toLowerCase() !== 'off';
 
-    // Stage 1 animation controls.
-    const animation = this._attr('animation', 'fade-up')
-      .toLowerCase();
-
-    const duration = this._numberAttr(
-      'duration', 400, 0, 2000
-    );
-
-    const stagger = this._numberAttr(
-      'stagger', 0, 0, 100
-    );
-
-    const distance = this._attr('distance', '12px');
-
-    const start = this._numberAttr(
-      'start', 0, 0, 0.99
-    );
-
-    const end = this._numberAttr(
-      'end', 0.85, 0.01, 1
-    );
-
+    const animation = this._attr('animation', 'fade-up').toLowerCase();
     const validAnimation =
       animation === 'fade' || animation === 'fade-up'
         ? animation
         : 'fade-up';
+
+    const duration = this._numberAttr('duration', 400, 0, 2000);
+    const stagger = this._numberAttr('stagger', 0, 0, 100);
+    const distance = this._attr('distance', '12px');
 
     const keys = {};
 
@@ -177,7 +173,7 @@ class ScrollHighlight extends HTMLElement {
       (this.getAttribute('font-url') || '').trim()
     );
 
-    // Split the sentence into words and preserve highlight groups.
+    // Parse highlighted phrases.
     const parts = [];
     const regex = /\{(\d):([^}]+)\}/g;
 
@@ -227,15 +223,12 @@ class ScrollHighlight extends HTMLElement {
       )
       .map(({ word, key }) => {
         const index = wordIndex++;
-
-        const highlightStyle = key
-          ? ` style="--u:${keys[key] || color}"`
-          : '';
+        const highlightColor = keys[key] || color;
 
         return (
-          `<span class="w${key ? ' k' : ''}"` +
-          ` style="--i:${index};${key ? `--u:${keys[key] || color};` : ''}"` +
-          `>${escapeText(word)}</span>`
+          `<span class="w${key ? ' k' : ''}" ` +
+          `style="--i:${index};--u:${highlightColor}">` +
+          `${escapeText(word)}</span>`
         );
       })
       .join(' ');
@@ -270,6 +263,7 @@ class ScrollHighlight extends HTMLElement {
           font-size: ${size};
           line-height: ${line};
           letter-spacing: -.035em;
+          overflow-wrap: break-word;
         }
 
         .w {
@@ -279,7 +273,7 @@ class ScrollHighlight extends HTMLElement {
           transition:
             opacity ${duration}ms ease,
             transform ${duration}ms cubic-bezier(.22, 1, .36, 1);
-          transition-delay: ${stagger}ms;
+          transition-delay: calc(var(--i) * ${stagger}ms);
         }
 
         .w.on {
@@ -289,6 +283,24 @@ class ScrollHighlight extends HTMLElement {
 
         .k {
           ${keyStyle}
+        }
+
+        @media (min-width: 769px) and (max-width: 1024px) {
+          p {
+            font-size: ${sizeTablet};
+            line-height: ${lineTablet};
+            text-align: ${alignTablet};
+            font-weight: ${weightTablet};
+          }
+        }
+
+        @media (max-width: 768px) {
+          p {
+            font-size: ${sizeMobile};
+            line-height: ${lineMobile};
+            text-align: ${alignMobile};
+            font-weight: ${weightMobile};
+          }
         }
 
         @media (prefers-reduced-motion: reduce) {
@@ -321,10 +333,8 @@ class ScrollHighlight extends HTMLElement {
     });
   }
 
-  // Find the nearest tall ancestor for the pinned-section effect.
   _findSection() {
     const minHeight = window.innerHeight * 1.5;
-
     let element = this.parentElement;
 
     while (
@@ -346,9 +356,7 @@ class ScrollHighlight extends HTMLElement {
     if (!this._words.length) return;
 
     if (this._reduced) {
-      this._words.forEach((word) =>
-        word.classList.add('on')
-      );
+      this._words.forEach((word) => word.classList.add('on'));
       return;
     }
 
@@ -373,25 +381,15 @@ class ScrollHighlight extends HTMLElement {
       const rect = target.getBoundingClientRect();
       const distance = Math.max(1, rect.height - vh);
 
-      // Normalized scroll progress through the tracked section.
       progress = -rect.top / distance;
     } else {
-      // Fallback: reveal as the element moves through the viewport.
       const rect = this.getBoundingClientRect();
 
-      progress =
-        (0.85 * vh - rect.top) / (0.7 * vh);
+      progress = (0.85 * vh - rect.top) / (0.7 * vh);
     }
 
-    // Map the scroll progress to the chosen reveal start/end.
-    const start = this._numberAttr(
-      'start', 0, 0, 0.99
-    );
-
-    const end = this._numberAttr(
-      'end', 0.85, 0.01, 1
-    );
-
+    const start = this._numberAttr('start', 0, 0, 0.99);
+    const end = this._numberAttr('end', 0.85, 0.01, 1);
     const range = Math.max(0.01, end - start);
 
     progress = Math.min(
@@ -399,7 +397,6 @@ class ScrollHighlight extends HTMLElement {
       Math.max(0, (progress - start) / range)
     );
 
-    // Keep the existing slightly accelerated reveal behavior.
     const count = Math.ceil(
       progress * this._words.length * 1.1
     );
@@ -411,8 +408,5 @@ class ScrollHighlight extends HTMLElement {
 }
 
 if (!customElements.get('scroll-highlight')) {
-  customElements.define(
-    'scroll-highlight',
-    ScrollHighlight
-  );
+  customElements.define('scroll-highlight', ScrollHighlight);
 }
