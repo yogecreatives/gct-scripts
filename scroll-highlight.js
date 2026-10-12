@@ -267,7 +267,7 @@ class ScrollHighlight extends HTMLElement {
         }
 
         .w {
-          display: inline;
+          display: inline-block;
           opacity: ${this._reduced ? 1 : dim};
           transform: ${this._reduced ? 'none' : initialTransform};
           transition:
