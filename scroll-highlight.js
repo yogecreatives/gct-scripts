@@ -129,9 +129,9 @@ class ScrollHighlight extends HTMLElement {
     const text = this.getAttribute('text') || DEFAULT_TEXT;
 
     const font = this._attr(
-      'font',
-      "'Plus Jakarta Sans', system-ui, sans-serif"
-    );
+  'font',
+  "'Instrument Serif', serif"
+);
 
     const color = this._attr('color', '#1b1a17');
     const dim = this._numberAttr('dim', 0.16, 0, 1);
