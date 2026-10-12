@@ -5,8 +5,8 @@
  * Attributes (set in the Custom Element settings panel):
  *   text   The sentence. Mark brand-colour phrases like {1:visas and jobs abroad,}
  *          1 = blue, 2 = purple, 3 = teal, 4 = red
- *   track  Optional CSS selector of a pinned/sticky Wix section (e.g. "#comp-abc123").
- *          If set, progress follows that section's scroll instead of this element.
+ *   track  Optional. Use "auto" to follow the tall section this element sits in (no id needed),
+ *          or a CSS selector such as "#comp-abc123". If empty, progress follows this element.
  *   font   Optional font-family (default: Plus Jakarta Sans, system-ui, sans-serif)
  *   color  Optional text colour (default: #1b1a17)
  *   dim    Optional opacity of words not yet lit (default: 0.16)
@@ -96,27 +96,20 @@ class ScrollHighlight extends HTMLElement {
     });
   }
 
+  // Finds the nearest tall ancestor (the pinned section) without needing its id.
+  _findSection() {
+    const min = window.innerHeight * 1.5;
+    let el = this.parentElement;
+    while (el && el !== document.body && el !== document.documentElement) {
+      if (el.offsetHeight > min) return el;
+      el = el.parentElement;
+    }
+    return null;
+  }
+
   _update() {
     if (this._reduced || !this._words.length) return;
     const vh = window.innerHeight;
     const sel = this.getAttribute('track');
-    const target = sel ? document.querySelector(sel) : null;
-    let p;
-    if (target) {
-      // Pinned section: progress = how far the section has scrolled past the screen.
-      const r = target.getBoundingClientRect();
-      p = -r.top / Math.max(1, r.height - vh);
-    } else {
-      // No pinning: lights up as this element travels up the screen.
-      const r = this.getBoundingClientRect();
-      p = (0.85 * vh - r.top) / (0.7 * vh);
-    }
-    p = Math.min(1, Math.max(0, p));
-    const n = Math.ceil(p * this._words.length * 1.1);
-    this._words.forEach((el, i) => el.classList.toggle('on', i < n));
-  }
-}
-
-if (!customElements.get('scroll-highlight')) {
-  customElements.define('scroll-highlight', ScrollHighlight);
-}
+    let target = null;
+    if (sel === 'auto') target =
