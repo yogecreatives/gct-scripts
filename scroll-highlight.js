@@ -267,21 +267,18 @@ class ScrollHighlight extends HTMLElement {
         }
 
 
+
 .w {
-  display: inline-block;
+  display: inline;
   opacity: 0.2;
-  transform: translate3d(0, 18px, 0);
-  transition:
-    opacity 600ms ease,
-    transform 600ms cubic-bezier(.22, 1, .36, 1);
-  transition-delay: calc(var(--i) * 25ms);
-  will-change: opacity, transform;
+  transition: opacity 500ms ease;
+  transition-delay: calc(var(--i) * 15ms);
 }
 
 .w.on {
   opacity: 1;
-  transform: translate3d(0, 0, 0);
 }
+
 
 
 
