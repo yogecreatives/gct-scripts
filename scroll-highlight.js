@@ -271,7 +271,7 @@ class ScrollHighlight extends HTMLElement {
           text-align: ${align};
           font-size: ${size};
           line-height: ${line};
-          letter-spacing: -.035em;
+          letter-spacing: normal;
           overflow-wrap: break-word;
 
           --sh-dim: ${dim};
