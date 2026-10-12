@@ -1,29 +1,14 @@
 
 /**
- * <scroll-highlight> custom element for Wix Studio
- * Premium scroll-driven word reveal with responsive typography.
+ * Scroll Highlight — Wix Studio Custom Element
  *
- * EXISTING ATTRIBUTES
- * text, track, font, font-url, color, dim, size, weight,
- * align, line, color1, color2, color3, color4, underline
- *
- * ANIMATION ATTRIBUTES
- * animation: fade | fade-up
- * duration: milliseconds (default 400)
- * stagger: per-word delay in milliseconds (default 0)
- * distance: initial vertical offset (default 12px)
- * start: normalized scroll progress (default 0)
- * end: normalized scroll progress (default 0.85)
- *
- * RESPONSIVE ATTRIBUTES
- * size-tablet, size-mobile
- * line-tablet, line-mobile
- * align-tablet, align-mobile
- * weight-tablet, weight-mobile
- *
- * Desktop uses the original size, line, align and weight attributes.
- * Tablet styles apply from 769px to 1024px.
- * Mobile styles apply at 768px and below.
+ * - Normal scrolling; no sticky container required.
+ * - No 300vh tracking section required.
+ * - First rendered line remains fully visible.
+ * - Remaining words fade in as the element scrolls through the viewport.
+ * - When the element completely leaves the viewport, the remaining
+ *   reveal finishes smoothly over 2.5 seconds.
+ * - Supports responsive typography and highlighted phrases.
  */
 
 const DEFAULT_TEXT =
@@ -36,6 +21,9 @@ const DEFAULT_KEYS = {
   3: '#0a5f73',
   4: '#e4002b'
 };
+
+const EXIT_FINISH_MS = 2500;
+const SCROLL_REVEAL_SHARE = 0.82;
 
 const safe = (value) =>
   String(value).replace(/[;{}<>"\\]/g, '').trim();
@@ -58,8 +46,12 @@ class ScrollHighlight extends HTMLElement {
     super();
 
     this.attachShadow({ mode: 'open' });
+
     this._words = [];
     this._raf = 0;
+    this._hasEntered = false;
+    this._exitStartedAt = null;
+    this._lastProgress = 0;
     this._queue = this._queue.bind(this);
 
     this._reduced = window.matchMedia(
@@ -87,16 +79,26 @@ class ScrollHighlight extends HTMLElement {
   }
 
   attributeChangedCallback() {
-    if (this.isConnected) this._render();
+    if (this.isConnected) {
+      this._hasEntered = false;
+      this._exitStartedAt = null;
+      this._lastProgress = 0;
+      this._render();
+    }
   }
 
   _attr(name, fallback) {
     const value = this.getAttribute(name);
-    return value && value.trim() ? safe(value) : fallback;
+
+    return value && value.trim()
+      ? safe(value)
+      : fallback;
   }
 
   _numberAttr(name, fallback, min, max) {
-    const value = Number.parseFloat(this.getAttribute(name));
+    const value = Number.parseFloat(
+      this.getAttribute(name)
+    );
 
     if (!Number.isFinite(value)) return fallback;
 
@@ -108,36 +110,43 @@ class ScrollHighlight extends HTMLElement {
 
     const exists = Array.from(
       document.head.querySelectorAll('link[data-sh-font]')
-    ).some((link) => link.getAttribute('data-sh-font') === url);
+    ).some(
+      (link) => link.getAttribute('data-sh-font') === url
+    );
 
     if (exists) return;
 
     const link = document.createElement('link');
+
     link.rel = 'stylesheet';
     link.href = url;
     link.setAttribute('data-sh-font', url);
+
     document.head.appendChild(link);
   }
 
   _render() {
-    const text = this.getAttribute('text') || DEFAULT_TEXT;
+    const text =
+      this.getAttribute('text') || DEFAULT_TEXT;
+
     const font = this._attr(
       'font',
       "'Plus Jakarta Sans', system-ui, sans-serif"
     );
 
     const color = this._attr('color', '#1b1a17');
-    const dim = this._numberAttr('dim', 0.16, 0, 1);
+    const dim = this._numberAttr('dim', 0.2, 0, 1);
 
     const size = this._attr(
       'size',
-      'clamp(1.75rem,5.2vw,4.4rem)'
+      'clamp(1.75rem, 5.2vw, 4.4rem)'
     );
+
     const weight = this._attr('weight', '700');
     const align = this._attr('align', 'left');
     const line = this._attr('line', '1.15');
 
-    // Responsive overrides. Empty attributes inherit desktop values.
+    // Responsive typography
     const sizeTablet = this._attr('size-tablet', size);
     const sizeMobile = this._attr('size-mobile', size);
 
@@ -153,27 +162,36 @@ class ScrollHighlight extends HTMLElement {
     const underline =
       this._attr('underline', 'on').toLowerCase() !== 'off';
 
-    const animation = this._attr('animation', 'fade-up').toLowerCase();
-    const validAnimation =
-      animation === 'fade' || animation === 'fade-up'
-        ? animation
-        : 'fade-up';
+    const animation =
+      this._attr('animation', 'fade').toLowerCase();
 
-    const duration = this._numberAttr('duration', 400, 0, 2000);
-    const stagger = this._numberAttr('stagger', 0, 0, 100);
+    const validAnimation =
+      animation === 'fade-up' ? 'fade-up' : 'fade';
+
+    const duration = this._numberAttr(
+      'duration', 500, 0, 2000
+    );
+
+    const stagger = this._numberAttr(
+      'stagger', 15, 0, 100
+    );
+
     const distance = this._attr('distance', '12px');
 
     const keys = {};
 
     for (let i = 1; i <= 4; i++) {
-      keys[i] = this._attr('color' + i, DEFAULT_KEYS[i]);
+      keys[i] = this._attr(
+        'color' + i,
+        DEFAULT_KEYS[i]
+      );
     }
 
     this._loadFont(
       (this.getAttribute('font-url') || '').trim()
     );
 
-    // Parse highlighted phrases.
+    // Parse highlighted phrases: {1:phrase}, {2:phrase}, etc.
     const parts = [];
     const regex = /\{(\d):([^}]+)\}/g;
 
@@ -233,14 +251,19 @@ class ScrollHighlight extends HTMLElement {
       })
       .join(' ');
 
-    const plain = text.replace(/\{\d:([^}]+)\}/g, '$1');
+    const plain = text.replace(
+      /\{\d:([^}]+)\}/g,
+      '$1'
+    );
 
     const keyStyle = underline
-      ? `text-decoration:underline;
-         text-decoration-color:var(--u);
-         text-decoration-thickness:.07em;
-         text-underline-offset:.14em`
-      : 'color:var(--u)';
+      ? `
+        text-decoration: underline;
+        text-decoration-color: var(--u);
+        text-decoration-thickness: .07em;
+        text-underline-offset: .14em;
+      `
+      : 'color: var(--u);';
 
     const initialTransform =
       validAnimation === 'fade-up'
@@ -266,21 +289,27 @@ class ScrollHighlight extends HTMLElement {
           overflow-wrap: break-word;
         }
 
+        .w {
+          display: inline;
+          opacity: ${this._reduced ? 1 : dim};
+          transform: ${this._reduced ? 'none' : initialTransform};
+          transition:
+            opacity ${duration}ms ease,
+            transform ${duration}ms cubic-bezier(.22, 1, .36, 1);
+          transition-delay: calc(var(--i) * ${stagger}ms);
+        }
 
+        .w.on {
+          opacity: 1;
+          transform: translate3d(0, 0, 0);
+        }
 
-.w {
-  display: inline;
-  opacity: 0.2;
-  transition: opacity 500ms ease;
-  transition-delay: calc(var(--i) * 15ms);
-}
-
-.w.on {
-  opacity: 1;
-}
-
-
-
+        /* Keep the first rendered line fully visible. */
+        .w.first-line {
+          opacity: 1 !important;
+          transform: none !important;
+          transition: none !important;
+        }
 
         .k {
           ${keyStyle}
@@ -313,7 +342,10 @@ class ScrollHighlight extends HTMLElement {
         }
       </style>
 
-      <p role="text" aria-label="${escapeText(plain).replace(/"/g, '&quot;')}">
+      <p
+        role="text"
+        aria-label="${escapeText(plain).replace(/"/g, '&quot;')}"
+      >
         ${html}
       </p>
     `;
@@ -334,80 +366,133 @@ class ScrollHighlight extends HTMLElement {
     });
   }
 
-  _findSection() {
-    const minHeight = window.innerHeight * 1.5;
-    let element = this.parentElement;
+  _markFirstVisualLine() {
+    if (!this._words.length) return;
 
-    while (
-      element &&
-      element !== document.body &&
-      element !== document.documentElement
-    ) {
-      if (element.offsetHeight > minHeight) {
-        return element;
+    this._words.forEach((word) => {
+      word.classList.remove('first-line');
+    });
+
+    // Use the first text fragment's top position. This works
+    // even when an inline word wraps onto another line.
+    const firstRect = this._words[0].getClientRects()[0];
+
+    if (!firstRect) return;
+
+    const firstTop = firstRect.top;
+
+    this._words.forEach((word) => {
+      const fragments = Array.from(word.getClientRects());
+
+      const isFirstLine = fragments.some(
+        (rect) => Math.abs(rect.top - firstTop) <= 2
+      );
+
+      if (isFirstLine) {
+        word.classList.add('first-line');
+        word.classList.add('on');
       }
+    });
+  }
 
-      element = element.parentElement;
-    }
+  _applyProgress(progress) {
+    const remainingWords = this._words.filter(
+      (word) => !word.classList.contains('first-line')
+    );
 
-    return null;
+    const count = Math.ceil(
+      Math.min(1, Math.max(0, progress)) *
+      remainingWords.length
+    );
+
+    remainingWords.forEach((word, index) => {
+      word.classList.toggle('on', index < count);
+    });
   }
 
   _update() {
     if (!this._words.length) return;
 
     if (this._reduced) {
-      this._words.forEach((word) => word.classList.add('on'));
+      this._words.forEach((word) => {
+        word.classList.add('on');
+      });
       return;
     }
 
+    this._markFirstVisualLine();
+
+    const rect = this.getBoundingClientRect();
     const vh = window.innerHeight;
-    const selector = this.getAttribute('track');
 
-    let target = null;
+    // Wait until the element begins entering the viewport.
+    if (rect.top >= vh && !this._hasEntered) {
+      this._applyProgress(0);
+      return;
+    }
 
-    if (selector === 'auto') {
-      target = this._findSection();
-    } else if (selector) {
-      try {
-        target = document.querySelector(selector);
-      } catch (error) {
-        target = null;
+    // Normal scroll-driven phase.
+    if (rect.bottom > 0) {
+      this._hasEntered = true;
+      this._exitStartedAt = null;
+
+      // Progress follows the element's movement from entering
+      // the bottom of the viewport to leaving the top.
+      const travel = Math.max(1, vh + rect.height);
+
+      const visibilityProgress = Math.min(
+        1,
+        Math.max(0, (vh - rect.top) / travel)
+      );
+
+      // Leave the final part of the reveal for the timed finish.
+      const progress =
+        visibilityProgress * SCROLL_REVEAL_SHARE;
+
+      this._lastProgress = Math.max(
+        this._lastProgress,
+        progress
+      );
+
+      this._applyProgress(this._lastProgress);
+      return;
+    }
+
+    // The whole element has left the viewport.
+    // Finish the remaining reveal over 2.5 seconds.
+    if (this._hasEntered) {
+      if (this._exitStartedAt === null) {
+        this._exitStartedAt = performance.now();
+      }
+
+      const elapsed =
+        performance.now() - this._exitStartedAt;
+
+      const t = Math.min(
+        1,
+        elapsed / EXIT_FINISH_MS
+      );
+
+      // Smooth ease-out instead of an abrupt jump.
+      const eased = 1 - Math.pow(1 - t, 2);
+
+      const progress =
+        this._lastProgress +
+        (1 - this._lastProgress) * eased;
+
+      this._lastProgress = progress;
+      this._applyProgress(progress);
+
+      if (t < 1) {
+        this._queue();
       }
     }
-
-    let progress;
-
-    if (target) {
-      const rect = target.getBoundingClientRect();
-      const distance = Math.max(1, rect.height - vh);
-
-      progress = -rect.top / distance;
-    } else {
-      const rect = this.getBoundingClientRect();
-
-      progress = (0.85 * vh - rect.top) / (0.7 * vh);
-    }
-
-    const start = this._numberAttr('start', 0, 0, 0.99);
-    const end = this._numberAttr('end', 0.85, 0.01, 1);
-    const range = Math.max(0.01, end - start);
-
-    progress = Math.min(
-      1,
-      Math.max(0, (progress - start) / range)
-    );
-
-    const count = Math.ceil(
-      progress * this._words.length * 1.1
-    );
-
-    this._words.forEach((word, index) => {
-      word.classList.toggle('on', index < count);
-    });
   }
 }
 
 if (!customElements.get('scroll-highlight')) {
-  customElements.define('scroll-highlight', ScrollHighlight);
+  customElements.define(
+    'scroll-highlight',
+    ScrollHighlight
+  );
 }
