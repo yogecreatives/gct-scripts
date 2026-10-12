@@ -1,421 +1,432 @@
 
+/**
+ * <scroll-highlight> custom element for Wix Studio
+ * Scroll-driven word reveal with responsive typography.
+ *
+ * EXISTING ATTRIBUTES
+ * text, track, font, font-url, color, dim, size, weight,
+ * align, line, color1, color2, color3, color4, underline
+ *
+ * ANIMATION ATTRIBUTES
+ * animation: fade | fade-up
+ * duration: milliseconds (default 400)
+ * stagger: per-word delay in milliseconds (default 0)
+ * distance: initial vertical offset (default 12px)
+ * start: normalized progress adjustment (default 0)
+ * end: normalized progress adjustment (default 1)
+ *
+ * SCROLL BEHAVIOR
+ * Starts when the element's top reaches 80vh.
+ * Finishes when the element's bottom reaches -20vh.
+ * The first visual line remains fully visible.
+ *
+ * RESPONSIVE ATTRIBUTES
+ * size-tablet, size-mobile
+ * line-tablet, line-mobile
+ * align-tablet, align-mobile
+ * weight-tablet, weight-mobile
+ */
+
+const DEFAULT_TEXT =
+  'One trusted group guiding every journey: {1:visas and jobs abroad,} {2:holidays,} ' +
+  '{3:Hajj and Umrah,} and {4:college admissions} across India, so you can move forward with confidence.';
+
+const DEFAULT_KEYS = {
+  1: '#1b4fa8',
+  2: '#8b6cfa',
+  3: '#0a5f73',
+  4: '#e4002b'
+};
+
+const safe = (value) =>
+  String(value).replace(/[;{}<>"\\]/g, '').trim();
+
 class ScrollHighlight extends HTMLElement {
   static get observedAttributes() {
     return [
-      "animation",
-      "dim",
-      "duration",
-      "stagger",
-      "font-family",
-      "font-size",
-      "font-size-desktop",
-      "font-size-tablet",
-      "font-size-mobile",
-      "font-weight",
-      "line-height",
-      "letter-spacing",
-      "text-align",
-      "color",
-      "highlight-1",
-      "highlight-2",
-      "highlight-3",
-      "highlight-4",
-      "highlight-5",
-      "track",
-      "start",
-      "end"
+      'text', 'track', 'font', 'font-url', 'color', 'dim',
+      'size', 'weight', 'align', 'line',
+      'color1', 'color2', 'color3', 'color4', 'underline',
+      'animation', 'duration', 'stagger', 'distance', 'start', 'end',
+      'size-tablet', 'size-mobile',
+      'line-tablet', 'line-mobile',
+      'align-tablet', 'align-mobile',
+      'weight-tablet', 'weight-mobile'
     ];
   }
 
   constructor() {
     super();
 
-    this._sourceHTML = null;
+    this.attachShadow({ mode: 'open' });
     this._words = [];
-    this._lastProgress = 0;
-    this._raf = null;
-    this._resizeObserver = null;
-    this._initialized = false;
+    this._raf = 0;
 
-    this._onScroll = this._onScroll.bind(this);
-    this._update = this._update.bind(this);
+    this._queue = this._queue.bind(this);
+    this._onResize = this._onResize.bind(this);
+
+    this._reduced = window.matchMedia(
+      '(prefers-reduced-motion: reduce)'
+    ).matches;
   }
 
   connectedCallback() {
-    if (this._sourceHTML === null) {
-      this._sourceHTML = this.innerHTML;
-    }
-
     this._render();
-    this._initialized = true;
 
-    window.addEventListener("scroll", this._onScroll, {
-      passive: true
-    });
-
-    window.addEventListener("resize", this._onScroll, {
-      passive: true
-    });
-
-    if ("ResizeObserver" in window) {
-      this._resizeObserver = new ResizeObserver(() => {
-        this._markFirstVisualLine();
-        this._onScroll();
+    if (!this._reduced) {
+      window.addEventListener('scroll', this._queue, {
+        passive: true
       });
 
-      this._resizeObserver.observe(this);
+      window.addEventListener('resize', this._onResize);
     }
 
-    this._onScroll();
+    this._queue();
   }
 
   disconnectedCallback() {
-    window.removeEventListener("scroll", this._onScroll);
-    window.removeEventListener("resize", this._onScroll);
-
-    if (this._resizeObserver) {
-      this._resizeObserver.disconnect();
-      this._resizeObserver = null;
-    }
-
-    if (this._raf !== null) {
-      cancelAnimationFrame(this._raf);
-      this._raf = null;
-    }
+    window.removeEventListener('scroll', this._queue);
+    window.removeEventListener('resize', this._onResize);
+    cancelAnimationFrame(this._raf);
   }
 
   attributeChangedCallback() {
-    if (!this._initialized || this._sourceHTML === null) {
-      return;
+    if (this.isConnected) {
+      this._render();
     }
+  }
 
-    this._render();
-    this._lastProgress = 0;
-    this._onScroll();
+  _attr(name, fallback) {
+    const value = this.getAttribute(name);
+    return value && value.trim() ? safe(value) : fallback;
+  }
+
+  _numberAttr(name, fallback, min, max) {
+    const value = Number.parseFloat(this.getAttribute(name));
+
+    if (!Number.isFinite(value)) return fallback;
+
+    return Math.min(max, Math.max(min, value));
+  }
+
+  _loadFont(url) {
+    if (!url || !/^https:\/\//.test(url)) return;
+
+    const exists = Array.from(
+      document.head.querySelectorAll('link[data-sh-font]')
+    ).some((link) => link.getAttribute('data-sh-font') === url);
+
+    if (exists) return;
+
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = url;
+    link.setAttribute('data-sh-font', url);
+    document.head.appendChild(link);
   }
 
   _render() {
-    const animation = this.getAttribute("animation") || "fade";
-    const dim = this._getNumber("dim", 0.2);
-    const duration = this._getNumber("duration", 500);
-    const stagger = this._getNumber("stagger", 15);
+    const text = this.getAttribute('text') || DEFAULT_TEXT;
 
-    const fontFamily = this.getAttribute("font-family");
-    const fontSize = this.getAttribute("font-size");
-    const fontSizeDesktop =
-      this.getAttribute("font-size-desktop") || fontSize;
-    const fontSizeTablet =
-      this.getAttribute("font-size-tablet") || fontSizeDesktop;
-    const fontSizeMobile =
-      this.getAttribute("font-size-mobile") || fontSizeTablet;
-
-    const fontWeight = this.getAttribute("font-weight");
-    const lineHeight = this.getAttribute("line-height");
-    const letterSpacing = this.getAttribute("letter-spacing");
-    const textAlign = this.getAttribute("text-align");
-    const color = this.getAttribute("color");
-
-    this.style.display = "block";
-
-    const styles = `
-      :host {
-        display: block;
-      }
-
-      .sh-content {
-        display: block;
-        font-family: inherit;
-        font-size: inherit;
-        line-height: inherit;
-        font-weight: inherit;
-        letter-spacing: inherit;
-        text-align: inherit;
-        color: inherit;
-      }
-
-      .sh-word {
-        display: inline-block;
-        opacity: ${dim};
-        transition:
-          opacity ${duration}ms ease,
-          transform ${duration}ms ease;
-        will-change: opacity, transform;
-      }
-
-      .sh-word.sh-first-line {
-        opacity: 1 !important;
-        transform: none !important;
-      }
-
-      .sh-content[data-animation="fade-up"] .sh-word {
-        transform: translateY(0.3em);
-      }
-
-      .sh-content[data-animation="fade-up"] .sh-word.sh-visible {
-        transform: translateY(0);
-      }
-
-      .sh-content[data-animation="fade"] .sh-word {
-        transform: none;
-      }
-
-      .sh-content .sh-highlight {
-        color: inherit;
-      }
-
-      ${[1, 2, 3, 4, 5]
-        .map((n) => {
-          const value = this.getAttribute(`highlight-${n}`);
-          return value
-            ? `.sh-content .sh-highlight-${n} { color: ${value}; }`
-            : "";
-        })
-        .join("\n")}
-
-      @media (min-width: 1025px) {
-        .sh-content {
-          ${fontSizeDesktop ? `font-size: ${fontSizeDesktop};` : ""}
-        }
-      }
-
-      @media (min-width: 768px) and (max-width: 1024px) {
-        .sh-content {
-          ${fontSizeTablet ? `font-size: ${fontSizeTablet};` : ""}
-        }
-      }
-
-      @media (max-width: 767px) {
-        .sh-content {
-          ${fontSizeMobile ? `font-size: ${fontSizeMobile};` : ""}
-        }
-      }
-    `;
-
-    this.innerHTML = "";
-
-    const style = document.createElement("style");
-    style.textContent = styles;
-    this.appendChild(style);
-
-    const content = document.createElement("div");
-    content.className = "sh-content";
-    content.dataset.animation =
-      animation === "fade-up" ? "fade-up" : "fade";
-
-    if (fontFamily) content.style.fontFamily = fontFamily;
-    if (fontWeight) content.style.fontWeight = fontWeight;
-    if (lineHeight) content.style.lineHeight = lineHeight;
-    if (letterSpacing) content.style.letterSpacing = letterSpacing;
-    if (textAlign) content.style.textAlign = textAlign;
-    if (color) content.style.color = color;
-
-    content.innerHTML = this._sourceHTML;
-    this.appendChild(content);
-
-    this._words = [];
-
-    // Convert {1:phrase} syntax into highlighted phrases.
-    // Split text into individual words without removing existing HTML.
-    const walker = document.createTreeWalker(
-      content,
-      NodeFilter.SHOW_TEXT,
-      {
-        acceptNode: (node) => {
-          const parent = node.parentElement;
-
-          if (
-            !node.nodeValue.trim() ||
-            (parent &&
-              parent.closest("script, style, .sh-word"))
-          ) {
-            return NodeFilter.FILTER_REJECT;
-          }
-
-          return NodeFilter.FILTER_ACCEPT;
-        }
-      }
+    const font = this._attr(
+      'font',
+      "'Plus Jakarta Sans', system-ui, sans-serif"
     );
 
-    const textNodes = [];
-    let node;
+    const color = this._attr('color', '#1b1a17');
+    const dim = this._numberAttr('dim', 0.16, 0, 1);
 
-    while ((node = walker.nextNode())) {
-      textNodes.push(node);
+    const size = this._attr(
+      'size',
+      'clamp(1.75rem,5.2vw,4.4rem)'
+    );
+
+    const weight = this._attr('weight', '700');
+    const align = this._attr('align', 'left');
+    const line = this._attr('line', '1.15');
+
+    // Responsive typography.
+    const sizeTablet = this._attr('size-tablet', size);
+    const sizeMobile = this._attr('size-mobile', size);
+
+    const lineTablet = this._attr('line-tablet', line);
+    const lineMobile = this._attr('line-mobile', line);
+
+    const alignTablet = this._attr('align-tablet', align);
+    const alignMobile = this._attr('align-mobile', align);
+
+    const weightTablet = this._attr('weight-tablet', weight);
+    const weightMobile = this._attr('weight-mobile', weight);
+
+    const underline =
+      this._attr('underline', 'on').toLowerCase() !== 'off';
+
+    const animation = this._attr('animation', 'fade-up').toLowerCase();
+
+    const validAnimation =
+      animation === 'fade' || animation === 'fade-up'
+        ? animation
+        : 'fade-up';
+
+    const duration = this._numberAttr('duration', 400, 0, 2000);
+    const stagger = this._numberAttr('stagger', 0, 0, 100);
+    const distance = this._attr('distance', '12px');
+
+    const keys = {};
+
+    for (let i = 1; i <= 4; i++) {
+      keys[i] = this._attr('color' + i, DEFAULT_KEYS[i]);
     }
 
-    for (const textNode of textNodes) {
-      const fragment = document.createDocumentFragment();
-      const text = textNode.nodeValue;
-      const pattern = /\{(\d+):([^{}]+)\}/g;
+    this._loadFont(
+      (this.getAttribute('font-url') || '').trim()
+    );
 
-      let lastIndex = 0;
-      let match;
+    // Parse highlighted phrases such as {1:highlighted words}.
+    const parts = [];
+    const regex = /\{(\d):([^}]+)\}/g;
 
-      while ((match = pattern.exec(text)) !== null) {
-        if (match.index > lastIndex) {
-          this._appendWords(
-            fragment,
-            text.slice(lastIndex, match.index),
-            null,
-            stagger
-          );
+    let last = 0;
+    let match;
+
+    while ((match = regex.exec(text))) {
+      if (match.index > last) {
+        parts.push({
+          text: text.slice(last, match.index),
+          key: 0
+        });
+      }
+
+      parts.push({
+        text: match[2],
+        key: Number(match[1])
+      });
+
+      last = regex.lastIndex;
+    }
+
+    if (last < text.length) {
+      parts.push({
+        text: text.slice(last),
+        key: 0
+      });
+    }
+
+    const escapeText = (value) =>
+      value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+
+    let wordIndex = 0;
+
+    const html = parts
+      .flatMap((part) =>
+        part.text
+          .split(/\s+/)
+          .filter(Boolean)
+          .map((word) => ({
+            word,
+            key: part.key
+          }))
+      )
+      .map(({ word, key }) => {
+        const index = wordIndex++;
+        const highlightColor = keys[key] || color;
+
+        return (
+          `<span class="w${key ? ' k' : ''}" ` +
+          `style="--i:${index};--u:${highlightColor}">` +
+          `${escapeText(word)}</span>`
+        );
+      })
+      .join(' ');
+
+    const plain = text.replace(/\{\d:([^}]+)\}/g, '$1');
+
+    const keyStyle = underline
+      ? `text-decoration:underline;
+         text-decoration-color:var(--u);
+         text-decoration-thickness:.07em;
+         text-underline-offset:.14em`
+      : 'color:var(--u)';
+
+    const initialTransform =
+      validAnimation === 'fade-up'
+        ? `translate3d(0, ${distance}, 0)`
+        : 'none';
+
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host {
+          display: block;
+          width: 100%;
         }
 
-        const highlight = document.createElement("span");
-        highlight.className =
-          `sh-highlight sh-highlight-${match[1]}`;
+        p {
+          margin: 0;
+          color: ${color};
+          font-family: ${font};
+          font-weight: ${weight};
+          text-align: ${align};
+          font-size: ${size};
+          line-height: ${line};
+          letter-spacing: -.035em;
+          overflow-wrap: break-word;
 
-        this._appendWords(
-          highlight,
-          match[2],
-          match[1],
-          stagger
-        );
+          --sh-dim: ${dim};
+          --sh-duration: ${duration}ms;
+          --sh-stagger: ${stagger}ms;
+        }
 
-        fragment.appendChild(highlight);
-        lastIndex = pattern.lastIndex;
-      }
+        .w {
+          display: inline;
+          opacity: var(--sh-dim);
+          transition:
+            opacity var(--sh-duration) ease,
+            transform var(--sh-duration) ease;
+          transition-delay: calc(var(--i) * var(--sh-stagger));
+          transform: ${initialTransform};
+        }
 
-      if (lastIndex < text.length) {
-        this._appendWords(
-          fragment,
-          text.slice(lastIndex),
-          null,
-          stagger
-        );
-      }
+        .w.on {
+          opacity: 1;
+          transform: none;
+        }
 
-      textNode.parentNode.replaceChild(fragment, textNode);
-    }
+        .w.first-line {
+          opacity: 1 !important;
+          transform: none !important;
+          transition-delay: 0ms !important;
+        }
 
-    this._markFirstVisualLine();
-    this._applyProgress(this._lastProgress);
+        .k {
+          ${keyStyle}
+        }
+
+        @media (min-width: 769px) and (max-width: 1024px) {
+          p {
+            font-size: ${sizeTablet};
+            line-height: ${lineTablet};
+            text-align: ${alignTablet};
+            font-weight: ${weightTablet};
+          }
+        }
+
+        @media (max-width: 768px) {
+          p {
+            font-size: ${sizeMobile};
+            line-height: ${lineMobile};
+            text-align: ${alignMobile};
+            font-weight: ${weightMobile};
+          }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .w {
+            opacity: 1 !important;
+            transform: none !important;
+            transition: none !important;
+          }
+        }
+      </style>
+
+      <p role="text" aria-label="${escapeText(plain).replace(/"/g, '&quot;')}">
+        ${html}
+      </p>
+    `;
+
+    this._words = Array.from(
+      this.shadowRoot.querySelectorAll('.w')
+    );
+
+    this._markFirstLine();
+    this._queue();
   }
 
-  _appendWords(container, text, highlightNumber, stagger) {
-    const parts = text.match(/\s+|[^\s]+/g) || [];
-
-    for (const part of parts) {
-      if (/^\s+$/.test(part)) {
-        container.appendChild(document.createTextNode(part));
-        continue;
-      }
-
-      const word = document.createElement("span");
-      word.className = "sh-word";
-      word.textContent = part;
-
-      word.style.transitionDelay =
-        `${this._words.length * stagger}ms`;
-
-      if (highlightNumber) {
-        word.dataset.highlight = highlightNumber;
-      }
-
-      this._words.push(word);
-      container.appendChild(word);
-    }
-  }
-
-  _markFirstVisualLine() {
+  _markFirstLine() {
     if (!this._words.length) return;
 
     this._words.forEach((word) => {
-      word.classList.remove("sh-first-line");
+      word.classList.remove('first-line');
     });
 
-    const firstWord = this._words[0];
-    const firstRect = firstWord.getBoundingClientRect();
+    const firstRect = this._words[0].getBoundingClientRect();
     const firstTop = firstRect.top;
 
-    for (const word of this._words) {
+    this._words.forEach((word) => {
       const rect = word.getBoundingClientRect();
 
       if (Math.abs(rect.top - firstTop) <= 2) {
-        word.classList.add("sh-first-line");
+        word.classList.add('first-line');
       }
-    }
+    });
   }
 
-  _onScroll() {
-    if (this._raf !== null) return;
+  _onResize() {
+    this._markFirstLine();
+    this._queue();
+  }
 
-    this._raf = requestAnimationFrame(this._update);
+  _queue() {
+    if (this._raf) return;
+
+    this._raf = requestAnimationFrame(() => {
+      this._raf = 0;
+      this._update();
+    });
   }
 
   _update() {
-    this._raf = null;
+    if (!this._words.length) return;
 
-    if (!this.isConnected || !this._words.length) {
+    if (this._reduced) {
+      this._words.forEach((word) => word.classList.add('on'));
       return;
     }
 
     const rect = this.getBoundingClientRect();
     const vh = window.innerHeight;
 
-    // START:
-    // Begin when the element's top reaches 80vh.
-    // This is 20vh into the viewport from the bottom.
+    // Start when the element's top reaches 20vh from the bottom.
     const startY = vh * 0.8;
 
-    // END:
-    // Finish when the element's bottom reaches 20vh
-    // beyond the top of the viewport.
+    // Finish when the element's bottom reaches 20vh above the viewport.
     const endTop = -rect.height - vh * 0.2;
 
-    const rawProgress =
+    let progress =
       (startY - rect.top) / (startY - endTop);
 
-    const progress = Math.max(
-      0,
-      Math.min(1, rawProgress)
+    // Optional normalized progress adjustments.
+    const start = this._numberAttr('start', 0, 0, 0.99);
+    const end = this._numberAttr('end', 1, 0.01, 1);
+    const range = Math.max(0.01, end - start);
+
+    progress = Math.min(
+      1,
+      Math.max(0, (progress - start) / range)
     );
 
-    // Preserve the existing one-way reveal behavior.
-    this._lastProgress = Math.max(
-      this._lastProgress,
-      progress
+    // Reveal words progressively across the scroll distance.
+    const revealableWords = this._words.filter(
+      (word) => !word.classList.contains('first-line')
     );
 
-    this._applyProgress(this._lastProgress);
-  }
-
-  _applyProgress(progress) {
-    const dim = Math.max(
-      0,
-      Math.min(1, this._getNumber("dim", 0.2))
+    const count = Math.ceil(
+      progress * revealableWords.length
     );
 
-    const total = this._words.length;
-
-    if (!total) return;
-
-    this._words.forEach((word, index) => {
-      if (word.classList.contains("sh-first-line")) {
-        word.style.opacity = "1";
-        word.classList.add("sh-visible");
-        return;
-      }
-
-      // Each word gets its own point along the scroll distance.
-      const threshold = total <= 1
-        ? 0
-        : index / (total - 1);
-
-      const revealed = progress >= threshold;
-
-      word.style.opacity = revealed ? "1" : String(dim);
-      word.classList.toggle("sh-visible", revealed);
+    revealableWords.forEach((word, index) => {
+      word.classList.toggle('on', index < count);
     });
-  }
 
-  _getNumber(attribute, fallback) {
-    const value = parseFloat(this.getAttribute(attribute));
-
-    return Number.isFinite(value) ? value : fallback;
+    // The first visual line remains fully visible.
+    this._words
+      .filter((word) => word.classList.contains('first-line'))
+      .forEach((word) => word.classList.add('on'));
   }
 }
 
-if (!customElements.get("scroll-highlight")) {
-  customElements.define("scroll-highlight", ScrollHighlight);
+if (!customElements.get('scroll-highlight')) {
+  customElements.define('scroll-highlight', ScrollHighlight);
 }
