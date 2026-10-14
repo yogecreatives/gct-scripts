@@ -390,10 +390,10 @@ class ScrollHighlight extends HTMLElement {
     const vh = window.innerHeight;
 
     // Start when the element's top reaches 20vh from the bottom.
-    const startY = vh * 0.8;
+    const startY = vh * 0.7;
 
     // Finish when the element's bottom reaches 20vh above the viewport.
-    const endTop = vh * 0.8 - rect.height;
+    const endTop = vh * 0.4 - rect.height;
 
     let progress =
       (startY - rect.top) / (startY - endTop);
